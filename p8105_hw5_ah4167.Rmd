@@ -67,7 +67,7 @@ baltimore_estimate = baltimore_tidy |>
   select(estimate, conf.low, conf.high)
 ```
 
-The estimated unsolved_homicides proportion for Baltimore is `r baltimore_estimate|>pull(estimate)`, and the confidence intervals is (`r baltimore_estimate|>pull(conf.low)`,`r baltimore_estimate|>pull(conf.high)`).
+The estimated unsolved_homicides proportion for Baltimore is `r baltimore_estimate|>pull(estimate)|>round(2)`, and the confidence intervals is (`r baltimore_estimate|>pull(conf.low)|>round(2)`,`r baltimore_estimate|>pull(conf.high)|>round(2)`).
 
 
 ```{r}
@@ -101,13 +101,12 @@ city_estimates|>
   ) +
   theme_minimal()
 ```
+
 We can see from the plota above, Chicago, IL is the city solving fewest homicides while Tulsa, AL is the city solving most homicides.
 
 
 # Problem2
 ```{r}
-
-
 # Create a dataframe containing all file names
 file_paths <- list.files(path = "./data/hw5_data", full.names = TRUE, pattern = "\\.csv$")
 ```
@@ -160,6 +159,124 @@ tidy_data|>
 ```
 
 We can see from the spaghetti plots above that the values of observations in the experimental group increased over time, while they remained relatively stable around their initial values in the control group.
+
+# Problem3
+
+```{r}
+# Set parameters
+n = 30 # Sample size
+sigma = 5 # Standard deviation
+mu = 0 # Population mean
+alpha = 0.05 # Significance level
+num_datasets = 5000 # Number of datasets
+
+# Function to perform t-test on a single dataset
+perform_t_test = function(mu=0, n=30, sigma=5) {
+  sample_data = rnorm(n, mean = mu, sd = sigma)
+  test_result = t.test(sample_data, mu = 0)
+  broom::tidy(test_result)
+}
+
+# Simulate datasets and perform t-tests
+simulated_tests = 
+  replicate(
+    num_datasets, 
+    perform_t_test(mu, n, sigma), 
+    simplify = FALSE)
+simulated_tests_df =bind_rows(simulated_tests)
+
+# Add identification for each simulation
+simulated_tests_df = 
+  simulated_tests_df |>
+  mutate(simulation = row_number())
+
+# Display a summary of the simulation results
+head(simulated_tests_df)
+
+```
+```{r}
+# Set parameters
+n = 30 # Sample size
+sigma = 5 # Standard deviation
+mu_values = 1:6
+alpha = 0.05 # Significance level
+num_datasets = 5000 # Number of datasets
+
+# Function to perform t-test on a single dataset
+perform_t_test = function(mu, n=30, sigma=5) {
+  sample_data = rnorm(n, mean = mu, sd = sigma)
+  test_result = t.test(sample_data, mu = 0)
+  broom::tidy(test_result)
+}
+
+# Run simulation for multiple values of mu
+simulation_results=
+  map(mu_values, 
+      function(mu) {
+        t_tests = replicate(num_datasets, perform_t_test(mu, n, sigma), simplify = FALSE)
+        t_tests_df = bind_rows(t_tests) |>
+          add_column(mu = mu, .before = 1) |>
+          mutate(rejected = p.value < alpha)
+        t_tests_df
+}) |> 
+  bind_rows()
+
+# Calculate the power for each value of mu
+power_df =
+  simulation_results |> 
+  group_by(mu) |>
+  summarise(power = mean(rejected))
+
+# Calculate the average estimate of mu_hat
+mu_hat_df =
+  simulation_results |>
+  group_by(mu) |>
+  summarise(avg_mu_hat = mean(estimate))
+
+# Calculate the average estimate of mu_hat where the null was rejected
+mu_hat_rejected_df =
+  simulation_results |> 
+  filter(rejected) |>
+  group_by(mu) |>
+  summarise(avg_mu_hat_rejected = mean(estimate))
+```
+```{r}
+# Plot the power vs. true value of mu
+ggplot(power_df, aes(x = mu, y = power)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "True Mean (mu)", y = "Power", title = "Power vs. True Mean")
+```
+
+The first plot shows the power of the test across different true means, we can see that power increases with the true mean because larger effect sizes are easier to detect.
+
+```{r}
+combined_estimates <- left_join(mu_hat_df, mu_hat_rejected_df, by = "mu")
+# Plot the power vs. true value of mu
+combined_estimates|>
+  pivot_longer(
+    avg_mu_hat:avg_mu_hat_rejected,
+    names_to="test",
+    values_to="avg_mu"
+  )|>
+  mutate(
+    test=case_match(
+      test,
+      "avg_mu_hat"~"fail_to_reject",
+      "avg_mu_hat_rejected"~"reject"
+    )
+  )|>
+  group_by(mu)|>
+  ggplot(aes(x = mu,y=avg_mu,color=test)) +
+  geom_point()+
+  geom_line() +
+  labs(x = "True Mean", y = "Average Estimated Mean)",
+       title = "Comparison of Average Estimates vs. True Mean") +
+  theme_minimal()
+```
+
+The second plot shows the average estimated mean versus the true mean, with an overlay of the average estimated mean when the null hypothesis was rejected. We observed that the average estimated mean is biased upwards when considering only those tests where the null was rejected, a phenomenon known as "winner's curse" in statistics, where estimates following a significant result tend to overestimate the true effect size due to the selection of only significant outcomes.
+
 
 
 
