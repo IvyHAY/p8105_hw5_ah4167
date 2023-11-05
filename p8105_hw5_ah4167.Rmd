@@ -4,4 +4,105 @@ author: "Aiying Huang"
 date: "2023-11-04"
 output: github_document
 ---
+```{r, include = FALSE, message = FALSE, warning = FALSE}
+library(tidyverse)
+
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = FALSE,
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(rvest)
+library(purrr)
+```
+```{r}
+homicide_data <- read_csv("./data/raw.githubusercontent.com_washingtonpost_data-homicides_master_homicide-data.csv")
+```
+The raw data has `r nrow(homicide_data)` entries and `r ncol(homicide_data) ` total columns, representing `r nrow(homicide_data)` cases of homicide and the victims' information.
+
+```{r}
+# Create a city_state variable and summarize the data
+homicide_summary =
+  homicide_data |>
+  mutate(city_state = paste(city, state, sep = ", ")) |>
+  group_by(city_state) |>
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
+  )
+```
+
+
+```{r}
+# Estimate the proportion for Baltimore, MD
+baltimore_data = homicide_summary|>
+  filter(city_state == "Baltimore, MD")
+
+baltimore_prop_test = prop.test(baltimore_data$unsolved_homicides, baltimore_data$total_homicides)
+
+# Save the output and use broom::tidy to tidy the data
+baltimore_tidy = broom::tidy(baltimore_prop_test)
+
+# Extract the estimated proportion and confidence intervals
+baltimore_estimate = baltimore_tidy |>
+  select(estimate, conf.low, conf.high)
+```
+
+The estimated unsolved_homicides proportion for Baltimore is `r baltimore_estimate|>pull(estimate)`, and the confidence intervals is (`r baltimore_estimate|>pull(conf.low)`,`r baltimore_estimate|>pull(conf.high)`).
+
+
+```{r}
+# Function to run prop.test and tidy results for each city
+prop_test_per_city = function(total, unsolved) {
+  test_result = prop.test(unsolved, total)
+  broom::tidy(test_result)
+}
+
+# Apply the function to each city and create a tidy dataframe
+city_estimates = homicide_summary |>
+  mutate(
+    prop_test_results = map2(
+      total_homicides, unsolved_homicides, prop_test_per_city)) |>
+  unnest(prop_test_results) |>
+  select(city_state, estimate, conf.low, conf.high)
+city_estimates|>
+  head(10)
+```
+```{r}
+# Create a plot with error bars for each city
+city_estimates|>
+  ggplot(aes(x = reorder(city_state, -estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +  # Flipping coordinates for horizontal bars
+  labs(
+    x = "City",
+    y = "Proportion of Unsolved Homicides",
+    title = "Proportion of Unsolved Homicides in US Cities"
+  ) +
+  theme_minimal()
+```
+We can see from the plota above, Chicago, IL is the city solving fewest homicides while Tulsa, AL is the city solving most homicides.
+
+
+
+
+
+
 
