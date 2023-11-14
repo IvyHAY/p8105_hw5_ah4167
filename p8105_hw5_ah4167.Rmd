@@ -34,75 +34,75 @@ library(purrr)
 
 # problem1
 
-```{r}
-homicide_data <- read_csv("./data/raw.githubusercontent.com_washingtonpost_data-homicides_master_homicide-data.csv")
-```
-The raw data has `r nrow(homicide_data)` entries and `r ncol(homicide_data) ` total columns, representing `r nrow(homicide_data)` cases of homicide and the victims' information.
-
-```{r}
-# Create a city_state variable and summarize the data
-homicide_summary =
-  homicide_data |>
-  mutate(city_state = paste(city, state, sep = ", ")) |>
-  group_by(city_state) |>
-  summarize(
-    total_homicides = n(),
-    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
-  )
-```
+For this problem, we are interested in data gathered and made public by _The Washington Post_ on homicides in 50 large U.S. cities. The code chunk below imports and cleans the data.
 
 
 ```{r}
-# Estimate the proportion for Baltimore, MD
-baltimore_data = homicide_summary|>
-  filter(city_state == "Baltimore, MD")
-
-baltimore_prop_test = prop.test(baltimore_data$unsolved_homicides, baltimore_data$total_homicides)
-
-# Save the output and use broom::tidy to tidy the data
-baltimore_tidy = broom::tidy(baltimore_prop_test)
-
-# Extract the estimated proportion and confidence intervals
-baltimore_estimate = baltimore_tidy |>
-  select(estimate, conf.low, conf.high)
-```
-
-The estimated unsolved_homicides proportion for Baltimore is `r baltimore_estimate|>pull(estimate)|>round(2)`, and the confidence intervals is (`r baltimore_estimate|>pull(conf.low)|>round(2)`,`r baltimore_estimate|>pull(conf.high)|>round(2)`).
-
-
-```{r}
-# Function to run prop.test and tidy results for each city
-prop_test_per_city = function(total, unsolved) {
-  test_result = prop.test(unsolved, total)
-  broom::tidy(test_result)
-}
-
-# Apply the function to each city and create a tidy dataframe
-city_estimates = homicide_summary |>
+homicide_df <- read_csv("./data/raw.githubusercontent.com_washingtonpost_data-homicides_master_homicide-data.csv", na = c("", "NA", "Unknown"))|>
   mutate(
-    prop_test_results = map2(
-      total_homicides, unsolved_homicides, prop_test_per_city)) |>
-  unnest(prop_test_results) |>
-  select(city_state, estimate, conf.low, conf.high)
-city_estimates|>
-  head(10)
-```
-```{r}
-# Create a plot with error bars for each city
-city_estimates|>
-  ggplot(aes(x = reorder(city_state, -estimate), y = estimate)) +
-  geom_point() +
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
-  coord_flip() +  # Flipping coordinates for horizontal bars
-  labs(
-    x = "City",
-    y = "Proportion of Unsolved Homicides",
-    title = "Proportion of Unsolved Homicides in US Cities"
-  ) +
-  theme_minimal()
+    city_state = str_c(city, state, sep = ", "),
+    resolution = case_when(
+      disposition == "Closed without arrest" ~ "unsolved",
+      disposition == "Open/No arrest"        ~ "unsolved",
+      disposition == "Closed by arrest"      ~ "solved"
+    )
+  ) |>
+  filter(city_state != "Tulsa, AL") 
 ```
 
-We can see from the plota above, Chicago, IL is the city solving fewest homicides while Tulsa, AL is the city solving most homicides.
+The resulting dataframe has `r nrow(homicide_df)` entries, on variables that include the victim name, race, age, and sex; the date the homicide was reported; and the location of the homicide. In cleaning, I created a `city_state` variable that includes both city and state, and a `resolution` variable to indicate whether the case was closed by arrest. I also excluded one entry in Tulsa, AL, which is not a major US city and is most likely a data entry error. 
+
+In the next code chunk, I group within cities and summarize to produce the total number of homicides and the number that are solved. 
+
+```{r}
+city_homicide_df = 
+  homicide_df %>% 
+  select(city_state, disposition, resolution) %>% 
+  group_by(city_state) %>% 
+  summarize(
+    hom_total = n(),
+    hom_unsolved = sum(resolution == "unsolved"))
+```
+
+Focusing only on Baltimore, MD, I can use the `prop.test` and `broom::tidy` functions to obtain an estimate and CI of the proportion of unsolved homicides in that city. The table below shows those values.
+
+```{r}
+bmore_test = 
+  prop.test(
+    x = filter(city_homicide_df, city_state == "Baltimore, MD") %>% pull(hom_unsolved),
+    n = filter(city_homicide_df, city_state == "Baltimore, MD") %>% pull(hom_total)) 
+
+broom::tidy(bmore_test) %>% 
+  knitr::kable(digits = 3)
+```
+
+Building on this code, I can use functions in the `purrr` package to obtain estimates and CIs for the proportion of unsolved homicides in each city in my dataset. The code below implements this analysis. 
+
+```{r}
+test_results = 
+  city_homicide_df %>% 
+  mutate(
+    prop_tests = map2(hom_unsolved, hom_total, \(x, y) prop.test(x = x, n = y)),
+    tidy_tests = map(prop_tests, broom::tidy)) %>% 
+  select(-prop_tests) %>% 
+  unnest(tidy_tests) %>% 
+  select(city_state, estimate, conf.low, conf.high) %>% 
+  mutate(city_state = fct_reorder(city_state, estimate))
+```
+
+Finally, I make a plot showing the estimate (and CI) of the proportion of unsolved homicides in each city.
+
+
+```{r}
+test_results %>% 
+  mutate(city_state = fct_reorder(city_state, estimate)) %>% 
+  ggplot(aes(x = city_state, y = estimate)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+This figure suggests a very wide range in the rate at which homicides are solved -- Chicago is noticeably high and, given the narrowness of the CI, likely is the location of many homicides. 
 
 
 # Problem2
